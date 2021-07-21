@@ -2,8 +2,9 @@ from itertools import count
 from brownie import Wei, reverts
 from useful_methods import genericStateOfStrat, genericStateOfVault, deposit, sleep
 import random
+import pytest
 
-
+@pytest.mark.require_network("mainnet-fork")
 def test_cream_up_down(
     interface,
     samdev,

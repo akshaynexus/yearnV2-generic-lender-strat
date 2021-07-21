@@ -25,12 +25,12 @@ contract EthCream is GenericLenderBase {
     using Address for address;
     using SafeMath for uint256;
 
-    uint256 private constant blocksPerYear = 2_300_000;
-    IWETH public constant weth = IWETH(address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
-    CEtherI public constant crETH = CEtherI(address(0xD06527D5e56A3495252A528C4987003b712860eE));
+    uint256 private blocksPerYear = 2_300_000;
+    IWETH public weth = IWETH(address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
+    CEtherI public crETH = CEtherI(address(0xD06527D5e56A3495252A528C4987003b712860eE));
 
     constructor(address _strategy, string memory name) public GenericLenderBase(_strategy, name) {
-        require(address(want) == address(weth), "NOT WETH");
+        // require(address(want) == address(weth), "NOT WETH");
         dust = 10;
     }
 
@@ -84,7 +84,7 @@ contract EthCream is GenericLenderBase {
     }
 
     //withdraw an amount including any want balance
-    function _withdraw(uint256 amount) internal returns (uint256) {
+    function _withdraw(uint256 amount) internal virtual returns (uint256) {
         uint256 balanceUnderlying = crETH.balanceOfUnderlying(address(this));
         uint256 looseBalance = want.balanceOf(address(this));
         uint256 total = balanceUnderlying.add(looseBalance);
@@ -119,14 +119,14 @@ contract EthCream is GenericLenderBase {
         return looseBalance;
     }
 
-    function deposit() external override management {
+    function deposit() public virtual override management {
         uint256 balance = want.balanceOf(address(this));
-
+        require(balance > 0, "No balance to deposit");
         weth.withdraw(balance);
         crETH.mint{value: balance}();
     }
 
-    function withdrawAll() external override management returns (bool) {
+    function withdrawAll() public virtual override management returns (bool all) {
         uint256 invested = _nav();
 
         uint256 balance = crETH.balanceOf(address(this));

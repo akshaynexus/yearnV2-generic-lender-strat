@@ -62,12 +62,11 @@ contract GenericCream is GenericLenderBase {
 
     function _nav() internal view returns (uint256) {
         uint256 amount = want.balanceOf(address(this)).add(underlyingBalanceStored());
-        if(amount < dustThreshold){
+        if (amount < dustThreshold) {
             return 0;
-        }else{
+        } else {
             return amount;
         }
-        
     }
 
     function underlyingBalanceStored() public view returns (uint256 balance) {
@@ -80,7 +79,7 @@ contract GenericCream is GenericLenderBase {
         }
     }
 
-    function convertFromUnderlying(uint256 amountOfUnderlying) public view returns (uint256 balance){
+    function convertFromUnderlying(uint256 amountOfUnderlying) public view returns (uint256 balance) {
         if (amountOfUnderlying == 0) {
             balance = 0;
         } else {
@@ -119,14 +118,14 @@ contract GenericCream is GenericLenderBase {
     }
 
     //withdraw an amount including any want balance
-    function _withdraw(uint256 amount) internal returns (uint256) {
+    function _withdraw(uint256 amount) internal virtual returns (uint256) {
         uint256 balanceUnderlying = cToken.balanceOfUnderlying(address(this));
         uint256 looseBalance = want.balanceOf(address(this));
         uint256 total = balanceUnderlying.add(looseBalance);
 
         if (amount.add(dustThreshold) >= total) {
             //cant withdraw more than we own. so withdraw all we can
-            if(balanceUnderlying > dustThreshold){
+            if (balanceUnderlying > dustThreshold) {
                 require(cToken.redeem(cToken.balanceOf(address(this))) == 0, "ctoken: redeemAll fail");
             }
             looseBalance = want.balanceOf(address(this));
@@ -150,27 +149,26 @@ contract GenericCream is GenericLenderBase {
                 toWithdraw = liquidity;
             }
             require(cToken.redeemUnderlying(toWithdraw) == 0, "ctoken: redeemUnderlying fail");
-            
         }
         looseBalance = want.balanceOf(address(this));
         want.safeTransfer(address(strategy), looseBalance);
         return looseBalance;
     }
 
-    function deposit() external override management {
+    function deposit() public virtual override management {
         uint256 balance = want.balanceOf(address(this));
         require(cToken.mint(balance) == 0, "ctoken: mint fail");
     }
 
     //we use different method to withdraw for safety
-    function withdrawAll() external override management returns (bool all) {
+    function withdrawAll() public virtual override management returns (bool all) {
         uint256 liquidity = want.balanceOf(address(cToken));
         uint256 liquidityInCTokens = convertFromUnderlying(liquidity);
         uint256 amountInCtokens = cToken.balanceOf(address(this));
 
         if (liquidityInCTokens > 2) {
-            liquidityInCTokens = liquidityInCTokens-1;
-           
+            liquidityInCTokens = liquidityInCTokens - 1;
+
             if (amountInCtokens <= liquidityInCTokens) {
                 //we can take all
                 all = true;

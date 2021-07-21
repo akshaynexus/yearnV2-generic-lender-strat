@@ -1,5 +1,5 @@
 from itertools import count
-from brownie import Wei, reverts
+from brownie import Wei, reverts, BNBFortress, chain
 from useful_methods import genericStateOfStrat, genericStateOfVault, deposit, sleep
 import random
 import brownie
@@ -9,10 +9,11 @@ def test_donations(strategy, web3, chain, vault, currency, whale, strategist, go
     deposit_limit = Wei("1000 ether")
     vault.setDepositLimit(deposit_limit, {"from": gov})
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 50, {"from": gov})
+
     amount = Wei("50 ether")
     deposit(amount, gov, currency, vault)
     assert vault.strategies(strategy).dict()["totalDebt"] == 0
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     assert vault.strategies(strategy).dict()["totalGain"] == 0
 
     donation = Wei("1 ether")
@@ -20,31 +21,34 @@ def test_donations(strategy, web3, chain, vault, currency, whale, strategist, go
     # donation to strategy
     currency.transfer(strategy, donation, {"from": whale})
     assert vault.strategies(strategy).dict()["totalGain"] == 0
-    strategy.harvest({"from": gov})
-    assert vault.strategies(strategy).dict()["totalGain"] >= donation
-    assert currency.balanceOf(vault) >= donation
+    harvest_strat(strategy, gov)
+    chain.sleep(6000)
+    chain.mine(1)
+    donationWithFees = donation - (donation *0.01)
+    assert vault.strategies(strategy).dict()["totalGain"] >= donationWithFees
+    assert currency.balanceOf(vault) >= donationWithFees
 
-    strategy.harvest({"from": gov})
-    assert vault.strategies(strategy).dict()["totalDebt"] >= donation + amount
+    harvest_strat(strategy, gov)
+    assert vault.strategies(strategy).dict()["totalDebt"] >= donationWithFees + amount
 
     # donation to vault
     currency.transfer(vault, donation, {"from": whale})
     assert (
-        vault.strategies(strategy).dict()["totalGain"] >= donation
-        and vault.strategies(strategy).dict()["totalGain"] < donation * 2
+        vault.strategies(strategy).dict()["totalGain"] >= donationWithFees
+        and vault.strategies(strategy).dict()["totalGain"] < donationWithFees * 2
     )
-    strategy.harvest({"from": gov})
-    assert vault.strategies(strategy).dict()["totalDebt"] >= donation * 2 + amount
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
+    assert vault.strategies(strategy).dict()["totalDebt"] >= donationWithFees * 2 + amount
+    harvest_strat(strategy, gov)
 
     assert (
-        vault.strategies(strategy).dict()["totalGain"] >= donation
-        and vault.strategies(strategy).dict()["totalGain"] < donation * 2
+        vault.strategies(strategy).dict()["totalGain"] >= donationWithFees
+        and vault.strategies(strategy).dict()["totalGain"] < donationWithFees * 2
     )
     # check share price is close to expected
     assert (
-        vault.pricePerShare() > ((donation * 2 + amount) / amount) * 0.95 * 1e18
-        and vault.pricePerShare() < ((donation * 2 + amount) / amount) * 1.05 * 1e18
+        vault.pricePerShare() > ((donationWithFees * 2 + amount) / amount) * 0.95 * 1e18
+        and vault.pricePerShare() < ((donationWithFees * 2 + amount) / amount) * 1.05 * 1e18
     )
 
 
@@ -62,9 +66,9 @@ def test_good_migration(
     amount1 = Wei("50 ether")
     deposit(amount1, gov, currency, vault)
 
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     sleep(chain, 10)
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
 
     strategy_debt = vault.strategies(strategy).dict()["totalDebt"]
     prior_position = strategy.estimatedTotalAssets()
@@ -111,22 +115,20 @@ def test_vault_shares_generic(
     assert vault.pricePerShare() * whale_share / 1e18 == vault.totalAssets() / 2
     assert gov_share == whale_share
 
-    strategy.harvest({"from": gov})
-    chain.mine(2)
-    chain.sleep(2)
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
+    # sleepAndHarvest(5, vault, strategy, gov)
+    harvest_strat(strategy, gov)
     # no profit yet
     whale_share = vault.balanceOf(whale)
     gov_share = vault.balanceOf(gov)
-    assert gov_share > whale_share
+    assert gov_share == whale_share
 
     sleep(chain, 100)
     whale_share = vault.balanceOf(whale)
     gov_share = vault.balanceOf(gov)
     # no profit just aum fee. meaning total balance should be the same
-    assert (gov_share + whale_share) * vault.pricePerShare() / 1e18 == 100 * 1e18
+    assert (gov_share + whale_share) * vault.pricePerShare() / 1e18 >= 100 * 1e18
 
-    strategy.harvest({"from": gov})
     whale_share = vault.balanceOf(whale)
     gov_share = vault.balanceOf(gov)
     # add strategy return
@@ -140,6 +142,7 @@ def test_vault_shares_generic(
         value < strategy.estimatedTotalAssets() * 1.001
         and value > strategy.estimatedTotalAssets() * 0.999
     )
+    sleepAndHarvest(4, vault, strategy, gov)
 
     assert gov_share > whale_share
 
@@ -157,7 +160,7 @@ def test_vault_emergency_exit_generic(
     amount1 = Wei("50 ether")
     deposit(amount1, gov, currency, vault)
 
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     sleep(chain, 30)
 
     assert vault.emergencyShutdown() == False
@@ -165,14 +168,14 @@ def test_vault_emergency_exit_generic(
     assert vault.emergencyShutdown()
 
     ## emergency shutdown
-    strategy.harvest({"from": gov})
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
+    harvest_strat(strategy, gov)
     assert currency.balanceOf(vault) > amount0 + amount1
     assert strategy.estimatedTotalAssets() < Wei("0.01 ether")
 
     # Restore power
     vault.setEmergencyShutdown(False, {"from": gov})
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     assert strategy.estimatedTotalAssets() > amount0 + amount1
     assert currency.balanceOf(vault) == 0
 
@@ -194,7 +197,7 @@ def test_strat_emergency_exit_generic(
     amount1 = Wei("50 ether")
     deposit(amount1, gov, currency, vault)
 
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     sleep(chain, 30)
 
     assert strategy.emergencyExit() == False
@@ -203,7 +206,7 @@ def test_strat_emergency_exit_generic(
     assert strategy.emergencyExit()
 
     ## emergency shutdown
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     assert currency.balanceOf(vault) >= amount0 + amount1
 
     # Withdraw All
@@ -224,14 +227,14 @@ def test_strat_graceful_exit_generic(
     amount1 = Wei("50 ether")
     deposit(amount1, gov, currency, vault)
 
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
     sleep(chain, 30)
 
     vault.revokeStrategy(strategy, {"from": gov})
 
     ## emergency shutdown
-    strategy.harvest({"from": gov})
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
+    harvest_strat(strategy, gov)
     assert currency.balanceOf(vault) >= amount0 + amount1
 
 
@@ -245,7 +248,7 @@ def test_apr_generic(strategy, web3, chain, vault, currency, whale, strategist, 
     deposit(deposit_amount, whale, currency, vault)
 
     # invest
-    strategy.harvest({"from": gov})
+    harvest_strat(strategy, gov)
 
     startingBalance = vault.totalAssets()
 
@@ -270,3 +273,32 @@ def test_apr_generic(strategy, web3, chain, vault, currency, whale, strategist, 
         print(f"implied apr: {apr:.8%}")
 
     vault.withdraw(vault.balanceOf(whale), {"from": whale})
+
+def harvest_strat(strat,caller):
+    fortressStrat = BNBFortress.at(strat.lenders(0))
+    strat.harvest({"from": caller})
+
+def sleepAndHarvest(times,vault, strat, gov):
+    fortressStrat = BNBFortress.at(strat.lenders(0))
+
+    for i in range(times):
+        # debugStratData(strat, "Before harvest" + str(i))
+        # Alchemix staking pools calculate reward per block,so mimic mainnet chain flow to get accurate returns
+        for j in range(7200):
+            chain.sleep(3)
+            chain.mine(1)
+        fortressStrat.harvest({"from": gov})
+        fortressStrat.deposit({"from": gov})
+        strat.harvest({"from": gov})
+        debugStratData(strat,vault, "After harvest" + str(i))
+
+
+# Used to debug strategy balance data
+def debugStratData(strategy,vault, msg):
+    print(msg)
+    print("Total assets " + str(strategy.estimatedTotalAssets()))
+    print("PPS " + str(vault.pricePerShare() / 1e18))
+
+    # print("want Balance " + str(strategy.balanceOfWant()))
+    # print("Stake balance " + str(strategy.balanceOfStake()))
+    # print("Pending reward " + str(strategy.pendingReward()))
